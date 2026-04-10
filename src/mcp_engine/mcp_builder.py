@@ -6,10 +6,8 @@ Assembles the final structured prompt for the LLM with:
 - CONTEXT: Top-k retrieved chunks, packed within a hard token budget
 - USER: Original question
 
-The MCP (Model Context Protocol) contract ensures:
-1. The LLM only sees structured context, never raw CSVs
-2. Token budget is enforced — context is greedily packed by similarity
-3. Chart data instructions are injected based on query type
+Uses a character-based token estimation (4 chars ≈ 1 token) since we're
+using Gemini which handles its own tokenization internally.
 
 Usage:
     from src.mcp_engine.mcp_builder import build_prompt
@@ -17,30 +15,20 @@ Usage:
     messages = build_prompt(question, retrieved_chunks, query_entities)
 """
 
+import json
 import logging
-import tiktoken
 from config import config
 
 logger = logging.getLogger(__name__)
 
+
 # ──────────────────────────────────────────────
-# Token counting
+# Token counting (approximation for Gemini)
 # ──────────────────────────────────────────────
-
-# Use cl100k_base encoding (used by GPT-4, GPT-4o)
-_ENCODER: tiktoken.Encoding | None = None
-
-
-def _get_encoder() -> tiktoken.Encoding:
-    global _ENCODER
-    if _ENCODER is None:
-        _ENCODER = tiktoken.encoding_for_model("gpt-4o")
-    return _ENCODER
-
 
 def count_tokens(text: str) -> int:
-    """Count the number of tokens in a text string."""
-    return len(_get_encoder().encode(text))
+    """Approximate token count. ~4 chars per token is a reasonable heuristic."""
+    return len(text) // 4
 
 
 # ──────────────────────────────────────────────
@@ -124,9 +112,12 @@ def build_prompt(
     question: str,
     retrieved_chunks: list[dict],
     query_type: str = "general",
-) -> list[dict]:
+) -> str:
     """
-    Build the final prompt messages for the LLM.
+    Build the final prompt for Gemini.
+
+    Gemini uses a single content string rather than separate system/user messages,
+    so we combine everything into one structured prompt.
 
     Args:
         question: The user's original question.
@@ -135,8 +126,7 @@ def build_prompt(
         query_type: One of "comparison", "strategy", "lap_time", "result", "general".
 
     Returns:
-        List of message dicts for the OpenAI chat API:
-        [{"role": "system", ...}, {"role": "user", ...}]
+        A single prompt string for Gemini.
     """
     # ── Build context block with token budget ──
     context_parts = []
@@ -164,7 +154,7 @@ def build_prompt(
     context_block = "\n\n".join(context_parts)
 
     logger.info(
-        f"Context: {chunks_included} chunks, {token_count} tokens "
+        f"Context: {chunks_included} chunks, ~{token_count} tokens "
         f"(budget: {max_tokens})"
     )
 
@@ -172,22 +162,19 @@ def build_prompt(
     chart_instructions = _CHART_INSTRUCTIONS.get(query_type, "")
     system_prompt = _SYSTEM_PROMPT.format(chart_instructions=chart_instructions)
 
-    # ── Assemble messages ──
-    user_content = f"""CONTEXT (retrieved F1 data — use ONLY this data):
+    # ── Assemble single prompt for Gemini ──
+    prompt = f"""{system_prompt}
+
+CONTEXT (retrieved F1 data — use ONLY this data):
 {context_block}
 
 QUESTION:
 {question}"""
 
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_content},
-    ]
+    total_tokens = count_tokens(prompt)
+    logger.info(f"Total prompt tokens (approx): {total_tokens}")
 
-    total_tokens = count_tokens(system_prompt) + count_tokens(user_content)
-    logger.info(f"Total prompt tokens: {total_tokens}")
-
-    return messages
+    return prompt
 
 
 def extract_chart_data(response_text: str) -> dict | None:
@@ -201,8 +188,6 @@ def extract_chart_data(response_text: str) -> dict | None:
 
     Returns the parsed dict, or None if not found.
     """
-    import json
-
     marker_start = "```chart_data"
     marker_end = "```"
 

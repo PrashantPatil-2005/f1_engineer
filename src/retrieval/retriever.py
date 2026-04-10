@@ -2,11 +2,11 @@
 F1 AI Race Engineer — FAISS Retriever
 
 Builds and queries FAISS vector indices from processed stint chunks.
+Uses Google Gemini text-embedding-004 (768 dims) for embeddings.
 
 Architecture:
 - One FAISS index per {year}_{race}_{session} (keeps indices small ~50 chunks)
 - Uses IndexFlatIP (inner product on L2-normalized vectors = cosine similarity)
-- Embeddings via OpenAI text-embedding-3-small (1536 dims)
 - Persistence: faiss.write_index / faiss.read_index — rebuild only when new data arrives
 
 Usage:
@@ -14,7 +14,6 @@ Usage:
 
     retriever = Retriever()
     results = retriever.query("Verstappen tyre strategy", chunks, top_k=8)
-    # Returns list of (chunk, similarity_score)
 """
 
 import time
@@ -23,7 +22,7 @@ import logging
 from pathlib import Path
 import numpy as np
 import faiss
-from openai import OpenAI
+from google import genai
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -33,7 +32,7 @@ class Retriever:
     """FAISS-based vector retriever for F1 stint chunks."""
 
     def __init__(self):
-        self._client = OpenAI(api_key=config.OPENAI_API_KEY)
+        self._client = genai.Client(api_key=config.GOOGLE_API_KEY)
         self._dimension = config.EMBEDDING_DIMENSIONS
 
     # ──────────────────────────────────────────
@@ -42,24 +41,27 @@ class Retriever:
 
     def _embed_texts(self, texts: list[str]) -> np.ndarray:
         """
-        Generate embeddings for a list of texts using OpenAI API.
+        Generate embeddings for a list of texts using Google Gemini API.
 
         Batches in groups of 100 to minimize latency.
 
         Returns:
-            np.ndarray of shape (len(texts), 1536), dtype float32, L2-normalized.
+            np.ndarray of shape (len(texts), 768), dtype float32, L2-normalized.
         """
         all_embeddings = []
         batch_size = 100
 
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
-            response = self._client.embeddings.create(
-                input=batch,
+            response = self._client.models.embed_content(
                 model=config.EMBEDDING_MODEL,
+                contents=batch,
+                config={
+                    "task_type": "RETRIEVAL_DOCUMENT",
+                },
             )
-            batch_embeddings = [item.embedding for item in response.data]
-            all_embeddings.extend(batch_embeddings)
+            for embedding in response.embeddings:
+                all_embeddings.append(embedding.values)
 
         embeddings = np.array(all_embeddings, dtype="float32")
 
@@ -71,12 +73,15 @@ class Retriever:
         return embeddings
 
     def _embed_query(self, query: str) -> np.ndarray:
-        """Embed a single query string. Returns (1, 1536) array, L2-normalized."""
-        response = self._client.embeddings.create(
-            input=[query],
+        """Embed a single query string. Returns (1, 768) array, L2-normalized."""
+        response = self._client.models.embed_content(
             model=config.EMBEDDING_MODEL,
+            contents=query,
+            config={
+                "task_type": "RETRIEVAL_QUERY",
+            },
         )
-        embedding = np.array([response.data[0].embedding], dtype="float32")
+        embedding = np.array([response.embeddings[0].values], dtype="float32")
 
         # L2-normalize
         norm = np.linalg.norm(embedding)
@@ -233,10 +238,12 @@ class Retriever:
                 "score": float(distances[0][i]),
             })
 
-        logger.info(
-            f"Retrieved {len(results)} chunks in {t_elapsed:.3f}s "
-            f"(top score: {results[0]['score']:.4f})" if results else
-            f"Retrieved 0 chunks in {t_elapsed:.3f}s"
-        )
+        if results:
+            logger.info(
+                f"Retrieved {len(results)} chunks in {t_elapsed:.3f}s "
+                f"(top score: {results[0]['score']:.4f})"
+            )
+        else:
+            logger.info(f"Retrieved 0 chunks in {t_elapsed:.3f}s")
 
         return results

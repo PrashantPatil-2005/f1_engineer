@@ -111,7 +111,7 @@ def ask():
     # ── Step 4: Build MCP prompt ──
     from src.mcp_engine.mcp_builder import build_prompt, extract_chart_data
 
-    messages = build_prompt(question, retrieved, entities.query_type)
+    prompt = build_prompt(question, retrieved, entities.query_type)
 
     # ── Step 5: Stream LLM response via SSE ──
     from src.llm_interface.llm import stream_completion
@@ -122,7 +122,7 @@ def ask():
         t_llm_start = time.perf_counter()
 
         try:
-            for delta in stream_completion(messages):
+            for delta in stream_completion(prompt):
                 full_response.append(delta)
                 event = json.dumps({"type": "token", "content": delta})
                 yield f"data: {event}\n\n"
@@ -224,7 +224,7 @@ def health():
             "faiss_indices": faiss_count,
         },
         "config": {
-            "model": config.OPENAI_MODEL,
+            "model": config.GEMINI_MODEL,
             "embedding_model": config.EMBEDDING_MODEL,
             "top_k": config.TOP_K,
             "max_context_tokens": config.MAX_CONTEXT_TOKENS,

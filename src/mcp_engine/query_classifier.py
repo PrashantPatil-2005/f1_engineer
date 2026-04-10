@@ -4,10 +4,7 @@ F1 AI Race Engineer — Query Classifier
 Extracts structured entities (year, race, driver, session type) from natural
 language questions BEFORE any data fetching happens.
 
-This is the routing step that decides which FastF1 session to load.
-Without it, the system doesn't know which data to fetch and the pipeline breaks.
-
-Uses OpenAI structured output (Pydantic schema) for 100% schema adherence.
+Uses Google Gemini structured output (Pydantic schema) for reliable extraction.
 
 Usage:
     from src.mcp_engine.query_classifier import classify_query
@@ -20,7 +17,8 @@ import time
 import logging
 from typing import Optional
 from pydantic import BaseModel, Field
-from openai import OpenAI
+from google import genai
+from google.genai import types
 from config import config
 from src.data_loader.load_race import get_race_names_for_year
 
@@ -168,29 +166,31 @@ def classify_query(question: str) -> QueryEntities:
         QueryEntities with year, race, driver, session_type, query_type.
 
     Raises:
-        RuntimeError: If OpenAI fails to return a valid classification.
+        RuntimeError: If Gemini fails to return a valid classification.
     """
     t_start = time.perf_counter()
 
-    client = OpenAI(api_key=config.OPENAI_API_KEY)
-
+    client = genai.Client(api_key=config.GOOGLE_API_KEY)
     system_prompt = _get_system_prompt()
 
     try:
-        completion = client.beta.chat.completions.parse(
-            model=config.OPENAI_MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": question},
-            ],
-            response_format=QueryEntities,
-            temperature=0,  # Deterministic extraction
+        response = client.models.generate_content(
+            model=config.GEMINI_MODEL,
+            contents=f"{system_prompt}\n\nUser question: {question}",
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=QueryEntities,
+                temperature=0,
+            ),
         )
 
-        entities = completion.choices[0].message.parsed
+        entities = response.parsed
 
     except Exception as e:
         raise RuntimeError(f"Query classification failed: {e}") from e
+
+    if entities is None:
+        raise RuntimeError("Query classification returned empty result")
 
     t_elapsed = time.perf_counter() - t_start
 

@@ -3,6 +3,8 @@ F1 AI Race Engineer — Central Configuration
 
 All modules import from here. Environment variables are loaded from .env,
 with sensible defaults for local development.
+
+Uses Google AI Studio (Gemini) — free API key from https://aistudio.google.com/apikey
 """
 
 import os
@@ -16,12 +18,12 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(_PROJECT_ROOT / ".env")
 
 # ──────────────────────────────────────────────
-# OpenAI
+# Google AI Studio (Gemini)
 # ──────────────────────────────────────────────
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
-EMBEDDING_DIMENSIONS = 1536  # text-embedding-3-small output dim
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-004")
+EMBEDDING_DIMENSIONS = 768  # text-embedding-004 output dim
 
 # ──────────────────────────────────────────────
 # Data directories (relative to project root)
@@ -75,8 +77,8 @@ SESSION_TYPES = {
 def validate():
     """Check that critical config is present. Call on startup."""
     errors = []
-    if not OPENAI_API_KEY:
-        errors.append("OPENAI_API_KEY is not set. Add it to .env")
+    if not GOOGLE_API_KEY:
+        errors.append("GOOGLE_API_KEY is not set. Get one free at https://aistudio.google.com/apikey and add it to .env")
     if errors:
         raise EnvironmentError(
             "Configuration errors:\n" + "\n".join(f"  - {e}" for e in errors)
