@@ -1,0 +1,34 @@
+# F1 AI Race Engineer
+
+## Byte-level ignores
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+## Environment
+.env
+venv/
+.venv/
+
+## Data (large, regenerable)
+data/cache/
+data/faiss/
+data/processed/
+data/metrics/
+
+## IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+## OS
+.DS_Store
+Thumbs.db
+
+## Node (Phase 2)
+frontend/node_modules/
+frontend/dist/

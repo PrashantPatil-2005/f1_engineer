@@ -1,0 +1,19 @@
+# F1 AI Race Engineer — Dependencies
+# Install: pip install -r requirements.txt
+
+# ── Core data pipeline ──
+fastf1>=3.3.0
+pandas>=2.2.0
+numpy>=1.26.0
+
+# ── AI / Embeddings / Vector search ──
+openai>=1.30.0
+faiss-cpu>=1.7.4
+tiktoken>=0.7.0
+
+# ── Web server ──
+flask>=3.0.0
+flask-cors>=4.0.0
+
+# ── Config ──
+python-dotenv>=1.0.0
