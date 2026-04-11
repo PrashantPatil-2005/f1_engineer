@@ -21,9 +21,9 @@ load_dotenv(_PROJECT_ROOT / ".env")
 # Google AI Studio (Gemini)
 # ──────────────────────────────────────────────
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-004")
-EMBEDDING_DIMENSIONS = 768  # text-embedding-004 output dim
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "gemini-embedding-001")
+EMBEDDING_DIMENSIONS = int(os.getenv("EMBEDDING_DIMENSIONS", "3072"))  # gemini-embedding-001 output dim
 
 # ──────────────────────────────────────────────
 # Data directories (relative to project root)
