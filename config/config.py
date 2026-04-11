@@ -58,6 +58,11 @@ FLASK_PORT = int(os.getenv("FLASK_PORT", "5000"))
 FLASK_DEBUG = os.getenv("FLASK_DEBUG", "false").lower() == "true"
 
 # ──────────────────────────────────────────────
+# MCP Server
+# ──────────────────────────────────────────────
+MCP_SERVER_SCRIPT = _PROJECT_ROOT / "mcp_server" / "server.py"
+
+# ──────────────────────────────────────────────
 # FastF1
 # ──────────────────────────────────────────────
 SUPPORTED_YEARS = list(range(2018, 2025))  # 2018–2024 inclusive

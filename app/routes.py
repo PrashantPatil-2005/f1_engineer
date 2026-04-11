@@ -1,12 +1,12 @@
 """
 F1 AI Race Engineer — API Routes
 
-POST /api/ask    — Main endpoint: question → streamed answer + chart_data
+POST /api/ask    — Main endpoint: question → MCP tool-use loop → streamed answer
 GET  /api/health — Health check with cache stats
 
 Full request flow:
-  POST /ask → Query classifier → Cache check → FastF1 fetch (if miss) →
-  Processor → FAISS retrieval → MCP builder → LLM stream → SSE response
+  POST /ask → MCP client connects → Gemini tool-use loop (discovers & calls
+  F1 data tools via MCP server) → streams final answer via SSE
 
 SSE format:
   data: {"type": "token", "content": "Max"}
@@ -16,6 +16,7 @@ SSE format:
 
 import json
 import time
+import asyncio
 import logging
 import threading
 from collections import defaultdict
@@ -57,13 +58,15 @@ def _check_rate_limit(ip: str) -> bool:
 
 
 # ──────────────────────────────────────────────
-# POST /api/ask — Main endpoint
+# POST /api/ask — Main endpoint (MCP + Gemini tool-use)
 # ──────────────────────────────────────────────
 
 @api_bp.route("/ask", methods=["POST"])
 def ask():
     """
     Process a natural language F1 question and stream the response.
+
+    Uses MCP client → MCP server (stdio) → Gemini tool-use loop.
 
     Request body:
         { "question": "Why did Verstappen win Monza 2024?" }
@@ -92,142 +95,59 @@ def ask():
     logger.info(f"━━━ New query: \"{question}\" ━━━")
     t_total_start = time.perf_counter()
 
-    # ── Step 1: Classify query ──
-    from src.mcp_engine.query_classifier import classify_query
-
-    try:
-        t_classify_start = time.perf_counter()
-        entities = classify_query(question)
-        t_classify = time.perf_counter() - t_classify_start
-    except Exception as e:
-        logger.error(f"Classification failed: {e}")
-        return jsonify({"error": f"Failed to understand your question: {e}"}), 500
-
-    logger.info(
-        f"Step 1 — Classified: year={entities.year}, race={entities.race}, "
-        f"driver={entities.driver}, type={entities.query_type} ({t_classify:.2f}s)"
-    )
-
-    # ── Step 2: Load or fetch data ──
-    from src.data_processor.process_data import load_chunks, process_session, save_chunks
-    from src.data_loader.load_race import load_session
-
-    t_data_start = time.perf_counter()
-    cache_hit = True
-
-    chunks = load_chunks(entities.year, entities.race, entities.session_type)
-    if chunks is None:
-        cache_hit = False
-        logger.info("Cache miss — fetching from FastF1...")
-        try:
-            session_data = load_session(
-                entities.year, entities.race, entities.session_type
-            )
-            chunks = process_session(session_data)
-            save_chunks(chunks, entities.year, entities.race, entities.session_type)
-        except Exception as e:
-            logger.error(f"Data loading failed: {e}")
-            return jsonify({"error": f"Failed to load race data: {e}"}), 500
-    else:
-        logger.info("Cache hit — using processed chunks from disk.")
-
-    t_data = time.perf_counter() - t_data_start
-
-    # ── Step 3: FAISS retrieval ──
-    from src.retrieval.retriever import Retriever
-
-    t_retrieval_start = time.perf_counter()
-    retriever = Retriever()
-
-    try:
-        index, indexed_chunks = retriever.load_or_build(
-            chunks, entities.year, entities.race, entities.session_type
-        )
-        retrieved = retriever.query(question, index, indexed_chunks)
-    except Exception as e:
-        logger.error(f"Retrieval failed: {e}")
-        return jsonify({"error": f"Failed to search race data: {e}"}), 500
-
-    t_retrieval = time.perf_counter() - t_retrieval_start
-
-    # ── Step 4: Build MCP prompt ──
-    from src.mcp_engine.mcp_builder import build_prompt, extract_chart_data
-
-    prompt = build_prompt(question, retrieved, entities.query_type)
-
-    # ── Step 5: Stream LLM response via SSE ──
-    from src.llm_interface.llm import stream_completion
-
     def generate():
-        """SSE generator — streams tokens, then sends final summary event."""
-        full_response = []
-        t_llm_start = time.perf_counter()
+        """SSE generator — runs MCP tool-use loop and streams the result."""
+        from src.mcp_client.client import F1MCPClient
+
+        # Create a dedicated event loop for this request's async work
+        loop = asyncio.new_event_loop()
 
         try:
-            for delta in stream_completion(prompt):
-                full_response.append(delta)
-                event = json.dumps({"type": "token", "content": delta})
-                yield f"data: {event}\n\n"
+            # Collect SSE events from the async generator
+            async def run_mcp_stream():
+                events = []
+                client = F1MCPClient()
+                await client.connect()
+                try:
+                    async for event in client.stream_with_tools(question):
+                        events.append(event)
+                finally:
+                    await client.disconnect()
+                return events
+
+            sse_events = loop.run_until_complete(run_mcp_stream())
+
+            # Parse the "done" event to inject metrics
+            for i, event in enumerate(sse_events):
+                if event.startswith("data: "):
+                    payload_str = event[6:].strip()
+                    try:
+                        payload = json.loads(payload_str)
+                        if payload.get("type") == "done":
+                            # Inject timing metrics
+                            t_total = time.perf_counter() - t_total_start
+                            payload["metrics"] = {
+                                "total_time": round(t_total, 3),
+                                "pipeline": "mcp_tool_use",
+                            }
+                            _save_metrics(question, payload["metrics"])
+                            sse_events[i] = f"data: {json.dumps(payload)}\n\n"
+                    except json.JSONDecodeError:
+                        pass
+
+            for event in sse_events:
+                yield event
 
         except Exception as e:
-            logger.error(f"LLM streaming failed: {e}")
+            logger.error(f"MCP pipeline failed: {e}")
             error_event = json.dumps({"type": "error", "content": str(e)})
             yield f"data: {error_event}\n\n"
-            return
 
-        t_llm = time.perf_counter() - t_llm_start
+        finally:
+            loop.close()
+
         t_total = time.perf_counter() - t_total_start
-
-        # ── Extract chart data from response ──
-        answer = "".join(full_response)
-        chart_data = extract_chart_data(answer)
-
-        # ── Clean answer (remove chart_data block from display text) ──
-        clean_answer = answer
-        if chart_data:
-            marker = "```chart_data"
-            idx = clean_answer.find(marker)
-            if idx != -1:
-                # Find closing ```
-                end_idx = clean_answer.find("```", idx + len(marker))
-                if end_idx != -1:
-                    clean_answer = (
-                        clean_answer[:idx].rstrip() +
-                        clean_answer[end_idx + 3:].lstrip()
-                    )
-
-        # ── Build metrics ──
-        metrics = {
-            "classify_time": round(t_classify, 3),
-            "data_time": round(t_data, 3),
-            "retrieval_time": round(t_retrieval, 3),
-            "llm_time": round(t_llm, 3),
-            "total_time": round(t_total, 3),
-            "cache_hit": cache_hit,
-            "chunks_retrieved": len(retrieved),
-            "year": entities.year,
-            "race": entities.race,
-            "session": entities.session_type,
-            "query_type": entities.query_type,
-        }
-
-        # ── Save metrics to disk ──
-        _save_metrics(question, metrics)
-
-        # ── Final done event ──
-        done_event = json.dumps({
-            "type": "done",
-            "answer": clean_answer,
-            "chart_data": chart_data,
-            "metrics": metrics,
-        })
-        yield f"data: {done_event}\n\n"
-
-        logger.info(
-            f"━━━ Done: {t_total:.2f}s total "
-            f"(classify={t_classify:.2f}s, data={t_data:.2f}s, "
-            f"retrieval={t_retrieval:.2f}s, llm={t_llm:.2f}s) ━━━"
-        )
+        logger.info(f"━━━ Done: {t_total:.2f}s total (MCP tool-use pipeline) ━━━")
 
     return Response(
         stream_with_context(generate()),
@@ -235,7 +155,7 @@ def ask():
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # Disable Nginx buffering
+            "X-Accel-Buffering": "no",
         },
     )
 
