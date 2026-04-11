@@ -1,0 +1,34 @@
+# ──────────────────────────────────────────────
+# F1 AI Race Engineer — Docker Compose
+# ──────────────────────────────────────────────
+# Single-service compose (no external databases needed).
+# FAISS index and processed data persist via volume mount.
+
+services:
+  f1-engineer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: f1-race-engineer
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+    environment:
+      - FLASK_HOST=0.0.0.0
+      - FLASK_PORT=5000
+      - FLASK_DEBUG=false
+    volumes:
+      # Persist cached data across container restarts
+      - f1_data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  f1_data:
+    driver: local

@@ -17,12 +17,43 @@ SSE format:
 import json
 import time
 import logging
+import threading
+from collections import defaultdict
 from flask import Blueprint, request, Response, jsonify, stream_with_context
 from config import config
 
 logger = logging.getLogger(__name__)
 
 api_bp = Blueprint("api", __name__)
+
+
+# ──────────────────────────────────────────────
+# Simple rate limiter (token bucket: 10 req/min)
+# ──────────────────────────────────────────────
+
+_rate_limits = defaultdict(lambda: {"tokens": 10, "last_refill": time.time()})
+_rate_lock = threading.Lock()
+RATE_LIMIT = 10        # requests per window
+RATE_WINDOW = 60       # seconds
+
+
+def _check_rate_limit(ip: str) -> bool:
+    """Check and consume a rate limit token. Returns True if allowed."""
+    with _rate_lock:
+        bucket = _rate_limits[ip]
+        now = time.time()
+
+        # Refill tokens based on elapsed time
+        elapsed = now - bucket["last_refill"]
+        refill = int(elapsed / RATE_WINDOW * RATE_LIMIT)
+        if refill > 0:
+            bucket["tokens"] = min(RATE_LIMIT, bucket["tokens"] + refill)
+            bucket["last_refill"] = now
+
+        if bucket["tokens"] > 0:
+            bucket["tokens"] -= 1
+            return True
+        return False
 
 
 # ──────────────────────────────────────────────
@@ -39,6 +70,14 @@ def ask():
 
     Response: SSE stream (text/event-stream)
     """
+    # ── Rate limiting ──
+    client_ip = request.remote_addr or "unknown"
+    if not _check_rate_limit(client_ip):
+        return jsonify({
+            "error": "Rate limit exceeded. Please wait a moment before trying again.",
+            "retry_after": RATE_WINDOW,
+        }), 429
+
     data = request.get_json(silent=True)
     if not data or "question" not in data:
         return jsonify({"error": "Missing 'question' field in request body"}), 400
@@ -46,6 +85,9 @@ def ask():
     question = data["question"].strip()
     if not question:
         return jsonify({"error": "Question cannot be empty"}), 400
+
+    if len(question) > 500:
+        return jsonify({"error": "Question too long (max 500 characters)"}), 400
 
     logger.info(f"━━━ New query: \"{question}\" ━━━")
     t_total_start = time.perf_counter()
@@ -192,6 +234,7 @@ def ask():
         mimetype="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
             "X-Accel-Buffering": "no",  # Disable Nginx buffering
         },
     )
