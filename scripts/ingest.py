@@ -1,16 +1,14 @@
-#!/usr/bin/env python3
 """
-F1 AI Race Engineer — Bulk Ingest Script
+F1 AI Race Engineer — Bulk Data Ingest Script
 
-Pre-processes F1 race data into chunks + FAISS indices so the app
-never hits cold-cache misses at query time.
+Pre-builds all FAISS indices so the app never has cold-cache misses.
 
 Usage:
-    python scripts/ingest.py                          # ingest everything
-    python scripts/ingest.py --years 2024             # just 2024 season
-    python scripts/ingest.py --years 2024 --races Monza Monaco  # specific races
-    python scripts/ingest.py --years 2024 --force     # rebuild even if cached
-    python scripts/ingest.py --years 2024 --dry-run   # preview only
+    python scripts/ingest.py                            # all years, all races
+    python scripts/ingest.py --years 2024               # one season
+    python scripts/ingest.py --years 2024 --races Monza Monaco
+    python scripts/ingest.py --years 2024 --force       # rebuild even if cached
+    python scripts/ingest.py --years 2024 --dry-run     # preview only
 """
 
 import sys
@@ -19,7 +17,7 @@ import argparse
 import logging
 from pathlib import Path
 
-# Add project root to path so src.* and config.* imports work
+# Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import fastf1
@@ -29,47 +27,60 @@ from src.data_processor.process_data import process_session, save_chunks, load_c
 from src.retrieval.retriever import Retriever
 
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s — %(message)s",
+    level=logging.WARNING,  # suppress noisy fastf1 logs
+    format="%(asctime)s [%(levelname)s] %(message)s",
 )
-logger = logging.getLogger("ingest")
+logger = logging.getLogger(__name__)
 
 
 def get_races_for_year(year: int) -> list[str]:
-    """Fetch all race event names for a season from FastF1."""
-    schedule = fastf1.get_event_schedule(year, include_testing=False)
-    races = []
-    for _, row in schedule.iterrows():
-        if row["EventFormat"] == "testing":
-            continue
-        races.append(row["EventName"])
-    return races
+    """Fetch all race names for a given year using FastF1 schedule."""
+    try:
+        schedule = fastf1.get_event_schedule(year, include_testing=False)
+        # Filter out testing events
+        races = schedule[schedule["EventFormat"] != "testing"]["EventName"].tolist()
+        return races
+    except Exception as e:
+        print(f"  ✗ Could not fetch schedule for {year}: {e}")
+        return []
 
 
-def build_plan(
-    years: list[int],
-    races: list[str] | None,
+def ingest_session(
+    year: int,
+    race: str,
     session_type: str,
-) -> list[tuple[int, str, str]]:
-    """Build the list of (year, race, session_type) triples to process."""
-    plan = []
-    for year in years:
-        if races:
-            year_races = races
-        else:
-            try:
-                year_races = get_races_for_year(year)
-            except Exception as e:
-                logger.warning(f"Could not fetch schedule for {year}: {e}")
-                continue
-        for race in year_races:
-            plan.append((year, race, session_type))
-    return plan
+    retriever: Retriever,
+    force: bool = False,
+) -> tuple[str, int]:
+    """
+    Ingest one session. Returns ("ok", chunk_count), ("skipped", 0), or ("failed", 0).
+    """
+    # Check if FAISS index already exists
+    if not force:
+        result = retriever.load_index(year, race, session_type)
+        if result is not None:
+            return "skipped", 0
+
+    # Load or reuse processed chunks
+    chunks = None
+    if not force:
+        chunks = load_chunks(year, race, session_type)
+
+    if chunks is None:
+        session_data = load_session(year, race, session_type)
+        chunks = process_session(session_data)
+        save_chunks(chunks, year, race, session_type)
+
+    # Build FAISS index
+    t_start = time.perf_counter()
+    retriever.build_index(chunks, year, race, session_type)
+    t_elapsed = time.perf_counter() - t_start
+    return "ok", len(chunks)
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="F1 Race Engineer — Bulk Ingest",
+        description="F1 AI Race Engineer — Bulk Ingest"
     )
     parser.add_argument(
         "--years",
@@ -83,18 +94,18 @@ def main():
         nargs="+",
         type=str,
         default=None,
-        help="Race names to ingest (default: all races for the given years)",
+        help="Race names to ingest (default: all races for given years)",
     )
     parser.add_argument(
         "--session",
         type=str,
         default="R",
-        help="Session type: R, Q, S, FP1, FP2, FP3 (default: R)",
+        help="Session type to ingest (default: R = Race)",
     )
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Re-process and rebuild FAISS even if files already exist",
+        help="Rebuild indices even if they already exist",
     )
     parser.add_argument(
         "--dry-run",
@@ -103,88 +114,87 @@ def main():
     )
     args = parser.parse_args()
 
-    # ── Header ──
-    print()
-    print("=" * 60)
+    print("\n" + "━" * 52)
     print("  F1 Race Engineer — Bulk Ingest")
-    print("=" * 60)
+    print("━" * 52)
 
-    # ── Build plan ──
-    plan = build_plan(args.years, args.races, args.session)
+    # Build the full list of (year, race) pairs to process
+    plan = []
+    for year in args.years:
+        if args.races:
+            race_list = args.races
+        else:
+            print(f"  Fetching schedule for {year}...")
+            race_list = get_races_for_year(year)
+            if not race_list:
+                continue
+        for race in race_list:
+            plan.append((year, race, args.session))
 
     if not plan:
-        print("\nNo sessions to process. Check your --years / --races arguments.")
+        print("  Nothing to process. Check your --years and --races arguments.")
         return
 
-    unique_years = sorted(set(y for y, _, _ in plan))
-    print(f"\nWill process {len(plan)} sessions across {len(unique_years)} year(s)")
-    print(f"Years: {unique_years}")
-    print(f"Session type: {args.session}")
+    print(f"  Will process {len(plan)} sessions across {len(args.years)} year(s)")
     if args.force:
-        print("Mode: FORCE (rebuilding all)")
+        print("  --force: rebuilding all indices even if cached")
     if args.dry_run:
-        print("Mode: DRY RUN (no changes)")
+        print("  --dry-run: preview only, no files written\n")
+        for year, race, session_type in plan:
+            print(f"  — {year} {race} ({session_type})")
+        print()
+        return
+
     print()
 
-    if args.dry_run:
-        for year, race, st in plan:
-            print(f"  — {year} {race} ({st})")
-        print(f"\n{len(plan)} sessions would be processed.")
-        return
-
-    # ── Process each session ──
     retriever = Retriever()
-    succeeded = 0
-    skipped = 0
-    failed = 0
-    failures = []
+    succeeded = []
+    skipped = []
+    failed = []
 
     for i, (year, race, session_type) in enumerate(plan, 1):
         label = f"{year} {race} ({session_type})"
+        print(f"  [{i}/{len(plan)}] {label}...", end=" ", flush=True)
+
         try:
-            # Check if FAISS index already exists
-            if not args.force:
-                existing = retriever.load_index(year, race, session_type)
-                if existing is not None:
-                    print(f"  — SKIP  [{i}/{len(plan)}] {label} (already indexed)")
-                    skipped += 1
-                    continue
-
-            # Load or build chunks
-            chunks = load_chunks(year, race, session_type)
-            if chunks is None or args.force:
-                session_data = load_session(year, race, session_type)
-                chunks = process_session(session_data)
-                save_chunks(chunks, year, race, session_type)
-
-            # Build FAISS index
-            retriever.build_index(chunks, year, race, session_type)
-
-            print(f"  \u2713 OK    [{i}/{len(plan)}] {label} \u2014 {len(chunks)} chunks indexed")
-            succeeded += 1
-
-            # Small delay to respect Gemini embedding API rate limits
-            if i < len(plan):
-                time.sleep(2)
-
+            status, chunk_count = ingest_session(year, race, session_type, retriever, args.force)
+            if status == "skipped":
+                print("— already indexed, skipping")
+                skipped.append(label)
+            else:
+                print(f"✓ done ({chunk_count} chunks)")
+                succeeded.append(label)
+                # Small delay to avoid rate limits on embedding API
+                time.sleep(1)
         except Exception as e:
-            print(f"  \u2717 FAIL  [{i}/{len(plan)}] {label}: {e}")
-            failed += 1
-            failures.append(label)
+            print(f"✗ FAILED: {e}")
+            failed.append((label, str(e)))
 
-    # ── Summary ──
+    # Summary
     print()
-    print("=" * 60)
-    print("  Summary")
-    print("=" * 60)
-    print(f"  Succeeded: {succeeded}")
-    print(f"  Skipped:   {skipped}")
-    print(f"  Failed:    {failed}")
-    if failures:
+    print("━" * 52)
+    print("  SUMMARY")
+    print("━" * 52)
+    print(f"  ✓ Succeeded : {len(succeeded)}")
+    print(f"  — Skipped   : {len(skipped)}")
+    print(f"  ✗ Failed    : {len(failed)}")
+
+    if failed:
+        print("\n  Failed sessions:")
+        for label, err in failed:
+            print(f"    ✗ {label}: {err}")
+
+    if succeeded:
         print()
-        print("  Failed sessions:")
-        for f in failures:
-            print(f"    \u2717 {f}")
+        print("  Run this to verify retrieval speed:")
+        print("  python -c \"")
+        print("  import time, sys")
+        print("  sys.path.insert(0, '.')")
+        print("  from src.retrieval.retriever import Retriever")
+        print("  r = Retriever()")
+        print("  # load any index that was just built")
+        print("  \"")
+
     print()
 
 

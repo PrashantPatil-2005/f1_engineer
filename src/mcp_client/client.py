@@ -42,17 +42,76 @@ CRITICAL RULES:
 4. Use F1 terminology naturally: stint, compound, undercut, overcut, degradation, delta, etc.
 5. Be concise but thorough. Engineers want signal, not padding.
 
-CHART OUTPUT RULES — MANDATORY, NOT OPTIONAL:
-You MUST include a ```chart_data block at the end of your response when the question
-involves ANY of: lap times, tyre strategy, driver comparison, race pace, stint analysis.
+# CHART OUTPUT RULES — MANDATORY, NOT OPTIONAL:
+# You MUST include a ```chart_data block at the end of your response when the question
+# involves ANY of: lap times, tyre strategy, driver comparison, race pace, stint analysis.
+#
+# Choose exactly ONE chart type based on the question:
+#
+# TYPE 1 — "lap_time_comparison" (use when comparing average/best lap times across drivers):
+# ```chart_data
+# {
+#   "type": "lap_time_comparison",
+#   "title": "<descriptive title>",
+#   "labels": ["Stint 1 Avg", "Stint 2 Avg", "Best Lap"],
+#   "datasets": [
+#     {"driver": "VER", "values": [76.5, 77.2, 75.8]},
+#     {"driver": "LEC", "values": [76.9, 77.5, 76.1]}
+#   ]
+# }
+# ```
+#
+# TYPE 2 — "tyre_strategy" (use when question is about pit stops, strategy, or tyre choices):
+# ```chart_data
+# {
+#   "type": "tyre_strategy",
+#   "title": "<descriptive title>",
+#   "drivers": [
+#     {
+#       "driver": "VER",
+#       "stints": [
+#         {"compound": "SOFT", "lap_start": 1, "lap_end": 18},
+#         {"compound": "HARD", "lap_start": 19, "lap_end": 53}
+#       ]
+#     }
+#   ]
+# }
+# ```
+# compound must be one of: SOFT, MEDIUM, HARD, INTERMEDIATE, WET
+#
+# TYPE 3 — "lap_times" (use when showing lap-by-lap progression for one or two drivers):
+# ```chart_data
+# {
+#   "type": "lap_times",
+#   "title": "<descriptive title>",
+#   "datasets": [
+#     {
+#       "driver": "VER",
+#       "laps": [1, 2, 3, 4, 5],
+#       "values": [76.5, 76.3, 76.8, 77.1, 76.4]
+#     }
+#   ]
+# }
+# ```
+#
+# RULES:
+# - All lap time values must be in SECONDS as floats (e.g., 76.5 = 1:16.500)
+# - The ```chart_data block must be the LAST thing in your response
+# - Use ONLY driver abbreviations (VER, LEC, HAM, etc.), never full names in chart data
+# - If the question has no data to chart (e.g., "who won in 2024?"), omit the block
 
-Choose exactly ONE chart type based on the question:
+CHART OUTPUT RULES:
+You MUST append a ```chart_data block at the very END of your response
+whenever the question involves lap times, tyre strategy, pit stops,
+driver comparison, race pace, or stint analysis.
 
-TYPE 1 — "lap_time_comparison" (use when comparing average/best lap times across drivers):
+Pick ONE type based on the question:
+
+TYPE "lap_time_comparison" — comparing avg/best lap times across drivers:
 ```chart_data
 {
   "type": "lap_time_comparison",
-  "title": "<descriptive title>",
+  "title": "descriptive title here",
   "labels": ["Stint 1 Avg", "Stint 2 Avg", "Best Lap"],
   "datasets": [
     {"driver": "VER", "values": [76.5, 77.2, 75.8]},
@@ -61,11 +120,11 @@ TYPE 1 — "lap_time_comparison" (use when comparing average/best lap times acro
 }
 ```
 
-TYPE 2 — "tyre_strategy" (use when question is about pit stops, strategy, or tyre choices):
+TYPE "tyre_strategy" — pit stops, strategy, tyre choices:
 ```chart_data
 {
   "type": "tyre_strategy",
-  "title": "<descriptive title>",
+  "title": "descriptive title here",
   "drivers": [
     {
       "driver": "VER",
@@ -79,11 +138,11 @@ TYPE 2 — "tyre_strategy" (use when question is about pit stops, strategy, or t
 ```
 compound must be one of: SOFT, MEDIUM, HARD, INTERMEDIATE, WET
 
-TYPE 3 — "lap_times" (use when showing lap-by-lap progression for one or two drivers):
+TYPE "lap_times" — lap-by-lap progression:
 ```chart_data
 {
   "type": "lap_times",
-  "title": "<descriptive title>",
+  "title": "descriptive title here",
   "datasets": [
     {
       "driver": "VER",
@@ -94,11 +153,11 @@ TYPE 3 — "lap_times" (use when showing lap-by-lap progression for one or two d
 }
 ```
 
-RULES:
-- All lap time values must be in SECONDS as floats (e.g., 76.5 = 1:16.500)
-- The ```chart_data block must be the LAST thing in your response
-- Use ONLY driver abbreviations (VER, LEC, HAM, etc.), never full names in chart data
-- If the question has no data to chart (e.g., "who won in 2024?"), omit the block"""
+STRICT RULES:
+- All time values in SECONDS as floats (76.5 = 1:16.500)
+- ```chart_data block must be the absolute LAST thing in your response
+- Driver codes only: VER, LEC, HAM, NOR, etc. Never full names in chart JSON
+- Only omit the block if the question is purely factual (winner, points, etc.)"""
 
 
 class F1MCPClient:
@@ -386,11 +445,11 @@ class F1MCPClient:
             logger.warning("Max tool-use rounds reached, generating final answer")
 
         # Stream the final text response, suppressing the ```chart_data block
-        full_response = []
-        in_chart_block = False
-        chart_block_done = False
-        chart_buffer = ""
-        visible_text = ""
+        # full_response = []
+        # in_chart_block = False
+        # chart_block_done = False
+        # chart_buffer = ""
+        # visible_text = ""
 
         # stream = client.models.generate_content_stream(
         #     model=config.GEMINI_MODEL,
@@ -409,49 +468,94 @@ class F1MCPClient:
             stream=True,
         )
 
+        # for chunk in stream:
+        #     # if not chunk.text:
+        #     #     continue
+        #     # full_response.append(chunk.text)
+        #     # text = chunk.text
+        #     delta = chunk.choices[0].delta.content
+        #     if not delta:
+        #         continue
+        #     full_response.append(delta)
+        #     text = delta
+        #
+        #     if not in_chart_block and not chart_block_done:
+        #         # Check if this chunk contains the chart marker
+        #         combined = visible_text[-20:] + text
+        #         if "```chart_data" in combined:
+        #             marker_pos = combined.find("```chart_data")
+        #             safe_len = max(0, marker_pos - len(visible_text[-20:]))
+        #             if text[:safe_len]:
+        #                 event = json.dumps({"type": "token", "content": text[:safe_len]})
+        #                 yield f"data: {event}\n\n"
+        #             visible_text = ""
+        #             in_chart_block = True
+        #             chart_buffer += text[safe_len:]
+        #         else:
+        #             visible_text = text
+        #             event = json.dumps({"type": "token", "content": text})
+        #             yield f"data: {event}\n\n"
+        #
+        #     elif in_chart_block and not chart_block_done:
+        #         chart_buffer += text
+        #         # Check if the closing ``` appeared (after the opening marker)
+        #         if "```" in chart_buffer[len("```chart_data"):]:
+        #             chart_block_done = True
+        #             in_chart_block = False
+        #             close_marker_pos = chart_buffer.find("```", len("```chart_data")) + 3
+        #             remainder = chart_buffer[close_marker_pos:]
+        #             if remainder.strip():
+        #                 event = json.dumps({"type": "token", "content": remainder})
+        #                 yield f"data: {event}\n\n"
+        #     else:
+        #         # After chart block is done, stream normally
+        #         event = json.dumps({"type": "token", "content": text})
+        #         yield f"data: {event}\n\n"
+
+        full_response = []
+        accumulated = ""
+        in_chart_block = False
+        chart_block_done = False
+
         for chunk in stream:
-            # if not chunk.text:
-            #     continue
-            # full_response.append(chunk.text)
-            # text = chunk.text
             delta = chunk.choices[0].delta.content
             if not delta:
                 continue
+
             full_response.append(delta)
-            text = delta
+            accumulated += delta
 
-            if not in_chart_block and not chart_block_done:
-                # Check if this chunk contains the chart marker
-                combined = visible_text[-20:] + text
-                if "```chart_data" in combined:
-                    marker_pos = combined.find("```chart_data")
-                    safe_len = max(0, marker_pos - len(visible_text[-20:]))
-                    if text[:safe_len]:
-                        event = json.dumps({"type": "token", "content": text[:safe_len]})
-                        yield f"data: {event}\n\n"
-                    visible_text = ""
+            if chart_block_done:
+                # After chart block closed, stream normally
+                event = json.dumps({"type": "token", "content": delta})
+                yield f"data: {event}\n\n"
+                continue
+
+            if not in_chart_block:
+                if "```chart_data" in accumulated:
+                    # Find where the chart block starts in accumulated
+                    marker_idx = accumulated.find("```chart_data")
+                    # Everything before the marker is safe to have been streamed already
+                    # Only suppress from here onward
                     in_chart_block = True
-                    chart_buffer += text[safe_len:]
+                    # Do NOT yield this delta - it contains or follows the marker
                 else:
-                    visible_text = text
-                    event = json.dumps({"type": "token", "content": text})
+                    event = json.dumps({"type": "token", "content": delta})
                     yield f"data: {event}\n\n"
-
-            elif in_chart_block and not chart_block_done:
-                chart_buffer += text
-                # Check if the closing ``` appeared (after the opening marker)
-                if "```" in chart_buffer[len("```chart_data"):]:
+            else:
+                # We are inside the chart block - check if closing ``` arrived
+                marker_start = accumulated.find("```chart_data")
+                after_marker = accumulated[marker_start + len("```chart_data"):]
+                if "```" in after_marker:
                     chart_block_done = True
                     in_chart_block = False
-                    close_marker_pos = chart_buffer.find("```", len("```chart_data")) + 3
-                    remainder = chart_buffer[close_marker_pos:]
-                    if remainder.strip():
-                        event = json.dumps({"type": "token", "content": remainder})
+                    # Check if there is any text after the closing ```
+                    close_idx = after_marker.find("```") + 3
+                    remainder = after_marker[close_idx:].strip()
+                    if remainder:
+                        event = json.dumps({"type": "token", "content": "\n" + remainder})
                         yield f"data: {event}\n\n"
-            else:
-                # After chart block is done, stream normally
-                event = json.dumps({"type": "token", "content": text})
-                yield f"data: {event}\n\n"
+                # else: still inside chart block, suppress this delta
 
         # Build final "done" event
         answer = "".join(full_response)
