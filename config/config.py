@@ -18,12 +18,24 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(_PROJECT_ROOT / ".env")
 
 # ──────────────────────────────────────────────
-# Google AI Studio (Gemini)
+# Google AI Studio (Gemini) — commented out, migrated to Groq
 # ──────────────────────────────────────────────
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "gemini-embedding-001")
-EMBEDDING_DIMENSIONS = int(os.getenv("EMBEDDING_DIMENSIONS", "3072"))  # gemini-embedding-001 output dim
+# GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+# GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+# EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "gemini-embedding-001")
+# EMBEDDING_DIMENSIONS = int(os.getenv("EMBEDDING_DIMENSIONS", "3072"))
+
+# ──────────────────────────────────────────────
+# Groq LLM
+# ──────────────────────────────────────────────
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+
+# ──────────────────────────────────────────────
+# Local Embeddings (sentence-transformers, runs on CPU, no API cost)
+# ──────────────────────────────────────────────
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+EMBEDDING_DIMENSIONS = 384  # all-MiniLM-L6-v2 fixed output dims — do not change
 
 # ──────────────────────────────────────────────
 # Data directories (relative to project root)
@@ -82,8 +94,10 @@ SESSION_TYPES = {
 def validate():
     """Check that critical config is present. Call on startup."""
     errors = []
-    if not GOOGLE_API_KEY:
-        errors.append("GOOGLE_API_KEY is not set. Get one free at https://aistudio.google.com/apikey and add it to .env")
+    # if not GOOGLE_API_KEY:
+    #     errors.append("GOOGLE_API_KEY is not set. Get one free at https://aistudio.google.com/apikey and add it to .env")
+    if not GROQ_API_KEY:
+        errors.append("GROQ_API_KEY is not set.")
     if errors:
         raise EnvironmentError(
             "Configuration errors:\n" + "\n".join(f"  - {e}" for e in errors)

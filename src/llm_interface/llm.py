@@ -17,16 +17,17 @@ Usage:
 import time
 import logging
 from typing import Generator
-from google import genai
-from google.genai import types
+# from google import genai
+# from google.genai import types
+from groq import Groq
 from config import config
 
 logger = logging.getLogger(__name__)
 
 
-def _get_client() -> genai.Client:
-    """Get a Google GenAI client instance."""
-    return genai.Client(api_key=config.GOOGLE_API_KEY)
+def _get_client() -> Groq:
+    """Get a Groq client instance."""
+    return Groq(api_key=config.GROQ_API_KEY)
 
 
 def stream_completion(
@@ -54,7 +55,8 @@ def stream_completion(
         RuntimeError: If the Gemini API call fails.
     """
     client = _get_client()
-    model = model or config.GEMINI_MODEL
+    # model = model or config.GEMINI_MODEL
+    model = model or config.GROQ_MODEL
     temperature = temperature if temperature is not None else config.LLM_TEMPERATURE
     max_tokens = max_tokens or config.LLM_MAX_TOKENS
 
@@ -63,19 +65,32 @@ def stream_completion(
     chunk_count = 0
 
     try:
-        response_stream = client.models.generate_content_stream(
-            model=model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                temperature=temperature,
-                max_output_tokens=max_tokens,
-            ),
-        )
+        # response_stream = client.models.generate_content_stream(
+        #     model=model,
+        #     contents=prompt,
+        #     config=types.GenerateContentConfig(
+        #         temperature=temperature,
+        #         max_output_tokens=max_tokens,
+        #     ),
+        # )
+        #
+        # for chunk in response_stream:
+        #     if chunk.text:
+        #         chunk_count += 1
+        #         yield chunk.text
 
-        for chunk in response_stream:
-            if chunk.text:
+        stream = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=True,
+        )
+        for chunk in stream:
+            delta = chunk.choices[0].delta.content
+            if delta:
                 chunk_count += 1
-                yield chunk.text
+                yield delta
 
     except Exception as e:
         logger.error(f"Streaming completion failed: {e}")
@@ -106,7 +121,8 @@ def complete(
             - time_s: float (elapsed time in seconds)
     """
     client = _get_client()
-    model = model or config.GEMINI_MODEL
+    # model = model or config.GEMINI_MODEL
+    model = model or config.GROQ_MODEL
     temperature = temperature if temperature is not None else config.LLM_TEMPERATURE
     max_tokens = max_tokens or config.LLM_MAX_TOKENS
 
@@ -114,20 +130,29 @@ def complete(
     t_start = time.perf_counter()
 
     try:
-        response = client.models.generate_content(
+        # response = client.models.generate_content(
+        #     model=model,
+        #     contents=prompt,
+        #     config=types.GenerateContentConfig(
+        #         temperature=temperature,
+        #         max_output_tokens=max_tokens,
+        #     ),
+        # )
+
+        response = client.chat.completions.create(
             model=model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                temperature=temperature,
-                max_output_tokens=max_tokens,
-            ),
+            messages=[{"role": "user", "content": prompt}],
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=False,
         )
     except Exception as e:
         logger.error(f"Completion failed: {e}")
         raise RuntimeError(f"LLM completion failed: {e}") from e
 
     t_elapsed = time.perf_counter() - t_start
-    content = response.text or ""
+    # content = response.text or ""
+    content = response.choices[0].message.content or ""
 
     logger.info(f"Completion done in {t_elapsed:.2f}s")
 

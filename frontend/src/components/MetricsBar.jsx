@@ -11,36 +11,36 @@ export default function MetricsBar({ metrics }) {
   const items = [
     {
       label: 'Total',
-      value: `${metrics.total_time}s`,
+      value: metrics.total_time != null ? `${metrics.total_time}s` : null,
       highlight: metrics.total_time < 5,
     },
-    {
+    metrics.classify_time != null && {
       label: 'Classify',
       value: `${metrics.classify_time}s`,
     },
-    {
+    metrics.data_time != null && {
       label: 'Data',
       value: `${metrics.data_time}s`,
       highlight: metrics.cache_hit,
     },
-    {
+    metrics.retrieval_time != null && {
       label: 'FAISS',
       value: `${metrics.retrieval_time}s`,
     },
-    {
+    metrics.llm_time != null && {
       label: 'LLM',
       value: `${metrics.llm_time}s`,
     },
-    {
+    metrics.cache_hit != null && {
       label: 'Cache',
       value: metrics.cache_hit ? 'HIT' : 'MISS',
       highlight: metrics.cache_hit,
     },
-    {
+    metrics.chunks_retrieved != null && {
       label: 'Chunks',
       value: metrics.chunks_retrieved,
     },
-  ];
+  ].filter(Boolean);
 
   return (
     <div
@@ -65,6 +65,14 @@ export default function MetricsBar({ metrics }) {
           {item.value}
         </div>
       ))}
+
+      {/* Pipeline indicator */}
+      {metrics.pipeline && (
+        <div className="metric-pill">
+          <span style={{ color: 'var(--text-muted)', marginRight: '4px' }}>⚡</span>
+          {metrics.pipeline}
+        </div>
+      )}
 
       {/* Session info */}
       {metrics.year && metrics.race && (

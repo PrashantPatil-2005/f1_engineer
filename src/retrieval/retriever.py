@@ -22,7 +22,8 @@ import logging
 from pathlib import Path
 import numpy as np
 import faiss
-from google import genai
+# from google import genai
+from sentence_transformers import SentenceTransformer
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -32,8 +33,10 @@ class Retriever:
     """FAISS-based vector retriever for F1 stint chunks."""
 
     def __init__(self):
-        self._client = genai.Client(api_key=config.GOOGLE_API_KEY)
-        self._dimension = config.EMBEDDING_DIMENSIONS
+        # self._client = genai.Client(api_key=config.GOOGLE_API_KEY)
+        # self._dimension = config.EMBEDDING_DIMENSIONS
+        self._model = SentenceTransformer(config.EMBEDDING_MODEL)
+        self._dimension = config.EMBEDDING_DIMENSIONS  # 384
 
     # ──────────────────────────────────────────
     # Embedding generation
@@ -41,53 +44,67 @@ class Retriever:
 
     def _embed_texts(self, texts: list[str]) -> np.ndarray:
         """
-        Generate embeddings for a list of texts using Google Gemini API.
-
-        Batches in groups of 100 to minimize latency.
+        Generate embeddings for a list of texts using sentence-transformers (local).
 
         Returns:
-            np.ndarray of shape (len(texts), 768), dtype float32, L2-normalized.
+            np.ndarray of shape (len(texts), 384), dtype float32, L2-normalized.
         """
-        all_embeddings = []
-        batch_size = 100
+        # all_embeddings = []
+        # batch_size = 100
+        #
+        # for i in range(0, len(texts), batch_size):
+        #     batch = texts[i : i + batch_size]
+        #     response = self._client.models.embed_content(
+        #         model=config.EMBEDDING_MODEL,
+        #         contents=batch,
+        #         config={
+        #             "task_type": "RETRIEVAL_DOCUMENT",
+        #         },
+        #     )
+        #     for embedding in response.embeddings:
+        #         all_embeddings.append(embedding.values)
+        #
+        # embeddings = np.array(all_embeddings, dtype="float32")
+        #
+        # # L2-normalize for cosine similarity via inner product
+        # norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+        # norms[norms == 0] = 1  # Avoid division by zero
+        # embeddings = embeddings / norms
+        #
+        # return embeddings
 
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i : i + batch_size]
-            response = self._client.models.embed_content(
-                model=config.EMBEDDING_MODEL,
-                contents=batch,
-                config={
-                    "task_type": "RETRIEVAL_DOCUMENT",
-                },
-            )
-            for embedding in response.embeddings:
-                all_embeddings.append(embedding.values)
-
-        embeddings = np.array(all_embeddings, dtype="float32")
-
-        # L2-normalize for cosine similarity via inner product
-        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-        norms[norms == 0] = 1  # Avoid division by zero
-        embeddings = embeddings / norms
-
+        embeddings = self._model.encode(
+            texts,
+            batch_size=64,
+            show_progress_bar=False,
+            normalize_embeddings=True,   # L2-normalize built-in
+            convert_to_numpy=True,
+        ).astype("float32")
         return embeddings
 
     def _embed_query(self, query: str) -> np.ndarray:
-        """Embed a single query string. Returns (1, 768) array, L2-normalized."""
-        response = self._client.models.embed_content(
-            model=config.EMBEDDING_MODEL,
-            contents=query,
-            config={
-                "task_type": "RETRIEVAL_QUERY",
-            },
-        )
-        embedding = np.array([response.embeddings[0].values], dtype="float32")
+        """Embed a single query string. Returns (1, 384) array, L2-normalized."""
+        # response = self._client.models.embed_content(
+        #     model=config.EMBEDDING_MODEL,
+        #     contents=query,
+        #     config={
+        #         "task_type": "RETRIEVAL_QUERY",
+        #     },
+        # )
+        # embedding = np.array([response.embeddings[0].values], dtype="float32")
+        #
+        # # L2-normalize
+        # norm = np.linalg.norm(embedding)
+        # if norm > 0:
+        #     embedding = embedding / norm
+        #
+        # return embedding
 
-        # L2-normalize
-        norm = np.linalg.norm(embedding)
-        if norm > 0:
-            embedding = embedding / norm
-
+        embedding = self._model.encode(
+            [query],
+            normalize_embeddings=True,
+            convert_to_numpy=True,
+        ).astype("float32")
         return embedding
 
     # ──────────────────────────────────────────
