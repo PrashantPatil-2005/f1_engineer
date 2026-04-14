@@ -13,6 +13,9 @@ import { useSSE } from '../hooks/useSSE';
 export default function ChatWindow({ onSessionComplete }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
+  const [isCompact, setIsCompact] = useState(
+    typeof window !== 'undefined' ? window.innerWidth <= 640 : false
+  );
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const currentStreamRef = useRef(null);
@@ -149,6 +152,14 @@ export default function ChatWindow({ onSessionComplete }) {
 
   const isEmpty = messages.length === 0;
 
+  useEffect(() => {
+    const onResize = () => {
+      setIsCompact(window.innerWidth <= 640);
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
   return (
     <div
       style={{
@@ -163,7 +174,7 @@ export default function ChatWindow({ onSessionComplete }) {
         style={{
           flex: 1,
           overflowY: 'auto',
-          padding: '24px 16px',
+          padding: isCompact ? '16px 10px' : '24px 16px',
           display: 'flex',
           flexDirection: 'column',
         }}
@@ -177,7 +188,7 @@ export default function ChatWindow({ onSessionComplete }) {
               flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: '32px',
+              gap: isCompact ? '20px' : '32px',
               paddingBottom: '60px',
             }}
           >
@@ -185,7 +196,7 @@ export default function ChatWindow({ onSessionComplete }) {
             <div style={{ textAlign: 'center' }} className="animate-fade-in-up">
               <div
                 style={{
-                  fontSize: '3rem',
+                  fontSize: isCompact ? '2.2rem' : '3rem',
                   marginBottom: '12px',
                   filter: 'drop-shadow(0 0 20px rgba(225, 6, 0, 0.3))',
                 }}
@@ -194,7 +205,7 @@ export default function ChatWindow({ onSessionComplete }) {
               </div>
               <h2
                 style={{
-                  fontSize: '1.5rem',
+                  fontSize: isCompact ? '1.2rem' : '1.5rem',
                   fontWeight: 800,
                   background: 'linear-gradient(135deg, var(--text-primary), var(--accent-cyan))',
                   WebkitBackgroundClip: 'text',
@@ -207,7 +218,7 @@ export default function ChatWindow({ onSessionComplete }) {
               <p
                 style={{
                   color: 'var(--text-secondary)',
-                  fontSize: '0.85rem',
+                  fontSize: isCompact ? '0.8rem' : '0.85rem',
                   maxWidth: '400px',
                   lineHeight: 1.5,
                 }}
@@ -234,7 +245,7 @@ export default function ChatWindow({ onSessionComplete }) {
       {/* Input area */}
       <div
         style={{
-          padding: '16px 20px',
+          padding: isCompact ? '12px 10px' : '16px 20px',
           borderTop: '1px solid var(--border-subtle)',
           background: 'var(--bg-secondary)',
         }}
@@ -242,9 +253,10 @@ export default function ChatWindow({ onSessionComplete }) {
         <div
           style={{
             display: 'flex',
-            gap: '10px',
+            gap: isCompact ? '8px' : '10px',
             maxWidth: '800px',
             margin: '0 auto',
+            alignItems: 'center',
           }}
         >
           <input
@@ -257,13 +269,14 @@ export default function ChatWindow({ onSessionComplete }) {
             id="query-input"
             style={{
               flex: 1,
-              padding: '12px 16px',
+              minWidth: 0,
+              padding: isCompact ? '10px 12px' : '12px 16px',
               borderRadius: 'var(--radius-md)',
               border: '1px solid var(--border-subtle)',
               background: 'var(--bg-surface)',
               color: 'var(--text-primary)',
               fontFamily: 'var(--font-body)',
-              fontSize: '0.9rem',
+              fontSize: isCompact ? '0.85rem' : '0.9rem',
               outline: 'none',
               transition: 'border-color 0.2s',
             }}
@@ -280,13 +293,13 @@ export default function ChatWindow({ onSessionComplete }) {
               onClick={cancel}
               id="cancel-btn"
               style={{
-                padding: '12px 20px',
+                padding: isCompact ? '10px 12px' : '12px 20px',
                 borderRadius: 'var(--radius-md)',
                 border: '1px solid var(--f1-red)',
                 background: 'rgba(225, 6, 0, 0.1)',
                 color: 'var(--f1-red)',
                 fontFamily: 'var(--font-mono)',
-                fontSize: '0.8rem',
+                fontSize: isCompact ? '0.72rem' : '0.8rem',
                 fontWeight: 600,
                 cursor: 'pointer',
                 transition: 'all 0.2s',
@@ -307,7 +320,7 @@ export default function ChatWindow({ onSessionComplete }) {
               disabled={!input.trim()}
               id="send-btn"
               style={{
-                padding: '12px 20px',
+                padding: isCompact ? '10px 12px' : '12px 20px',
                 borderRadius: 'var(--radius-md)',
                 border: 'none',
                 background: input.trim()
@@ -315,7 +328,7 @@ export default function ChatWindow({ onSessionComplete }) {
                   : 'var(--bg-surface)',
                 color: input.trim() ? '#fff' : 'var(--text-muted)',
                 fontFamily: 'var(--font-mono)',
-                fontSize: '0.8rem',
+                fontSize: isCompact ? '0.72rem' : '0.8rem',
                 fontWeight: 600,
                 cursor: input.trim() ? 'pointer' : 'not-allowed',
                 transition: 'all 0.2s',
@@ -341,7 +354,7 @@ export default function ChatWindow({ onSessionComplete }) {
           style={{
             textAlign: 'center',
             fontFamily: 'var(--font-mono)',
-            fontSize: '0.6rem',
+            fontSize: isCompact ? '0.55rem' : '0.6rem',
             color: 'var(--text-muted)',
             marginTop: '8px',
             letterSpacing: '0.5px',

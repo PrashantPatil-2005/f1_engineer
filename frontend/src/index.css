@@ -81,12 +81,23 @@ body {
   font-family: var(--font-body);
   background: var(--bg-primary);
   color: var(--text-primary);
-  min-height: 100vh;
+  min-height: 100dvh;
   overflow: hidden;
 }
 
 #root {
-  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+input,
+button {
+  touch-action: manipulation;
+}
+
+@media (max-width: 900px) {
+  html {
+    font-size: 15px;
+  }
 }
 
 /* ── Scrollbar Styling ── */

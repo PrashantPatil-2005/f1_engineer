@@ -4,15 +4,44 @@
  * F1 AI Race Engineer — Phase 2 Frontend
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import ChatWindow from './components/ChatWindow';
 import SessionHistory from './components/SessionHistory';
 import { useSessionHistory } from './hooks/useSessionHistory';
 
 export default function App() {
   const { sessions, addSession, clearHistory, deleteSession } = useSessionHistory();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const getIsMobile = () => (typeof window !== 'undefined' ? window.innerWidth <= 900 : false);
+  const [isMobile, setIsMobile] = useState(getIsMobile);
+  const [sidebarOpen, setSidebarOpen] = useState(!getIsMobile());
   const [chatKey, setChatKey] = useState(0);
+
+  useEffect(() => {
+    const onResize = () => {
+      const mobile = getIsMobile();
+      setIsMobile(mobile);
+      setSidebarOpen((prev) => (mobile ? prev : true));
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  useEffect(() => {
+    const keepAliveUrl =
+      import.meta.env.VITE_KEEP_ALIVE_URL ||
+      `${window.location.origin}/api/health`;
+
+    const ping = () => {
+      fetch(keepAliveUrl, { cache: 'no-store' })
+        .then(() => console.log('keep-alive pinged'))
+        .catch((err) => {
+          console.error('keep-alive ping failed:', err);
+        });
+    };
+    ping();
+    const interval = window.setInterval(ping, 45000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   const handleSessionComplete = useCallback(
     (session) => {
@@ -53,14 +82,20 @@ export default function App() {
       {/* Sidebar */}
       <aside
         style={{
-          width: sidebarOpen ? '280px' : '0px',
-          minWidth: sidebarOpen ? '280px' : '0px',
+          width: isMobile ? '280px' : sidebarOpen ? '280px' : '0px',
+          minWidth: isMobile ? '280px' : sidebarOpen ? '280px' : '0px',
           background: 'var(--bg-secondary)',
-          borderRight: sidebarOpen ? '1px solid var(--border-subtle)' : 'none',
+          borderRight: sidebarOpen || !isMobile ? '1px solid var(--border-subtle)' : 'none',
           transition: 'all 0.3s ease',
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
+          position: isMobile ? 'fixed' : 'relative',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          transform: isMobile ? (sidebarOpen ? 'translateX(0)' : 'translateX(-100%)') : 'none',
+          zIndex: isMobile ? 40 : 'auto',
         }}
       >
         {/* Sidebar header */}
@@ -195,7 +230,7 @@ export default function App() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '10px 20px',
+            padding: isMobile ? '10px 12px' : '10px 20px',
             borderBottom: '1px solid var(--border-subtle)',
             background: 'rgba(17, 17, 24, 0.8)',
             backdropFilter: 'blur(12px)',
@@ -230,7 +265,7 @@ export default function App() {
             <span
               style={{
                 fontFamily: 'var(--font-mono)',
-                fontSize: '0.7rem',
+                fontSize: isMobile ? '0.62rem' : '0.7rem',
                 color: 'var(--text-muted)',
                 textTransform: 'uppercase',
                 letterSpacing: '1.5px',
@@ -262,6 +297,7 @@ export default function App() {
                 fontFamily: 'var(--font-mono)',
                 fontSize: '0.65rem',
                 color: 'var(--text-muted)',
+                display: isMobile ? 'none' : 'inline',
               }}
             >
               CONNECTED
@@ -277,6 +313,18 @@ export default function App() {
           />
         </div>
       </main>
+
+      {isMobile && sidebarOpen && (
+        <div
+          onClick={() => setSidebarOpen(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.35)',
+            zIndex: 30,
+          }}
+        />
+      )}
     </div>
   );
 }
