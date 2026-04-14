@@ -1,0 +1,44 @@
+name: Keep Backend Awake (Redundant)
+
+# Second independent keep-alive workflow for redundancy.
+# If the primary workflow gets delayed or skipped by GitHub's scheduler,
+# this one provides a safety net. Uses a different cron expression so
+# GitHub treats it as a separate schedule slot.
+
+on:
+  schedule:
+    - cron: "2-59/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: keep-alive-backup
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    name: Redundant ping /api/health
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping backend
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+        run: |
+          if [ -z "$BACKEND_URL" ]; then
+            echo "::error::BACKEND_URL secret is not set."
+            exit 1
+          fi
+          url="${BACKEND_URL%/}/api/health"
+          echo "Pinging $url"
+          code=$(curl -sS -o /tmp/body -w "%{http_code}" \
+            --max-time 120 \
+            --retry 5 \
+            --retry-delay 15 \
+            --retry-all-errors \
+            "$url" || echo "000")
+          echo "HTTP $code"
+          cat /tmp/body || true
+          echo
+          if [ "$code" != "200" ]; then
+            exit 1
+          fi

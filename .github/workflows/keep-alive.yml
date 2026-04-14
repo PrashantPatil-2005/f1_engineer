@@ -1,33 +1,81 @@
 name: Keep Backend Awake
 
+# Render free tier spins down after 15 min of inactivity.
+# We ping every 5 min to leave a wide safety margin for GitHub Actions
+# scheduler delays (which can be 10-20+ min under load).
+
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
+  push:
+    branches: [main]
 
 concurrency:
   group: keep-alive
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   ping:
     name: Ping /api/health
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - name: Ping backend
+      - name: Verify secret is set
         env:
           BACKEND_URL: ${{ secrets.BACKEND_URL }}
         run: |
           if [ -z "$BACKEND_URL" ]; then
-            echo "BACKEND_URL secret not set — skipping."
-            exit 0
+            echo "::error::BACKEND_URL secret is not set. Keep-alive cannot run."
+            exit 1
           fi
+
+      - name: Ping backend (first attempt)
+        id: ping1
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+        run: |
           url="${BACKEND_URL%/}/api/health"
           echo "Pinging $url"
-          code=$(curl -sS -o /tmp/body -w "%{http_code}" --max-time 60 --retry 3 --retry-delay 5 "$url" || echo "000")
+          code=$(curl -sS -o /tmp/body -w "%{http_code}" \
+            --max-time 90 \
+            --retry 5 \
+            --retry-delay 10 \
+            --retry-all-errors \
+            "$url" || echo "000")
           echo "HTTP $code"
           cat /tmp/body || true
           echo
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          if [ "$code" != "200" ]; then
+            exit 1
+          fi
+
+      - name: Second ping (belt-and-braces, 30s later)
+        if: always() && steps.ping1.outcome == 'success'
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+        run: |
+          sleep 30
+          url="${BACKEND_URL%/}/api/health"
+          curl -sS --max-time 60 --retry 3 --retry-delay 5 "$url" || true
+
+      - name: Recovery ping if first attempt failed
+        if: failure() && steps.ping1.outcome == 'failure'
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+        run: |
+          url="${BACKEND_URL%/}/api/health"
+          echo "First ping failed — waiting 60s for Render cold-start then retrying"
+          sleep 60
+          code=$(curl -sS -o /tmp/body -w "%{http_code}" \
+            --max-time 120 \
+            --retry 5 \
+            --retry-delay 15 \
+            --retry-all-errors \
+            "$url" || echo "000")
+          echo "Recovery HTTP $code"
+          cat /tmp/body || true
           if [ "$code" != "200" ]; then
             exit 1
           fi
