@@ -10,7 +10,7 @@ import SessionHistory from './components/SessionHistory';
 import { useSessionHistory } from './hooks/useSessionHistory';
 
 export default function App() {
-  const { sessions, addSession, clearHistory, deleteSession } = useSessionHistory();
+  const { sessions, addSession, clearHistory } = useSessionHistory();
   const getIsMobile = () => (typeof window !== 'undefined' ? window.innerWidth <= 900 : false);
   const [isMobile, setIsMobile] = useState(getIsMobile);
   const [sidebarOpen, setSidebarOpen] = useState(!getIsMobile());
@@ -189,7 +189,6 @@ export default function App() {
             sessions={sessions}
             onSelect={handleSelectHistory}
             onClear={clearHistory}
-            onDelete={deleteSession}
           />
         </div>
 

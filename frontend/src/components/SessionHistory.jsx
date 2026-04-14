@@ -28,7 +28,7 @@ function truncate(str, len = 55) {
   return str.length > len ? str.slice(0, len) + '...' : str;
 }
 
-export default function SessionHistory({ sessions, onSelect, onClear, onDelete }) {
+export default function SessionHistory({ sessions, onSelect, onClear }) {
   return (
     <div
       style={{

@@ -41,6 +41,7 @@ export default function ChatWindow({ onSessionComplete }) {
   // Update the streaming message in real-time
   useEffect(() => {
     if (isStreaming && tokens && currentStreamRef.current !== null) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setMessages((prev) => {
         const updated = [...prev];
         const lastIdx = updated.length - 1;
@@ -59,6 +60,7 @@ export default function ChatWindow({ onSessionComplete }) {
   // Handle stream completion
   useEffect(() => {
     if (!isStreaming && answer && currentStreamRef.current !== null) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setMessages((prev) => {
         const updated = [...prev];
         const lastIdx = updated.length - 1;
@@ -91,6 +93,7 @@ export default function ChatWindow({ onSessionComplete }) {
   // Handle error
   useEffect(() => {
     if (error && currentStreamRef.current !== null) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setMessages((prev) => {
         const updated = [...prev];
         const lastIdx = updated.length - 1;
