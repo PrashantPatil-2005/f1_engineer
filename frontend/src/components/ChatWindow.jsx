@@ -347,7 +347,7 @@ export default function ChatWindow({ onSessionComplete }) {
             letterSpacing: '0.5px',
           }}
         >
-          Powered by FastF1 • Gemini • FAISS
+          Powered by FastF1 • FAISS
         </p>
       </div>
     </div>
