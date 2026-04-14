@@ -1,0 +1,33 @@
+name: Keep Backend Awake
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: keep-alive
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    name: Ping /api/health
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping backend
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+        run: |
+          if [ -z "$BACKEND_URL" ]; then
+            echo "BACKEND_URL secret not set — skipping."
+            exit 0
+          fi
+          url="${BACKEND_URL%/}/api/health"
+          echo "Pinging $url"
+          code=$(curl -sS -o /tmp/body -w "%{http_code}" --max-time 60 --retry 3 --retry-delay 5 "$url" || echo "000")
+          echo "HTTP $code"
+          cat /tmp/body || true
+          echo
+          if [ "$code" != "200" ]; then
+            exit 1
+          fi
