@@ -10,8 +10,10 @@ Usage:
 
 import logging
 from pathlib import Path
+
 from flask import Flask, send_from_directory
 from flask_cors import CORS
+
 from config import config
 
 # ──────────────────────────────────────────────
@@ -50,7 +52,7 @@ def create_app() -> Flask:
     try:
         config.validate()
         logger.info("Configuration validated successfully.")
-    except EnvironmentError as e:
+    except OSError as e:
         logger.error(f"Configuration error: {e}")
         # Don't crash — allow health endpoint to report the error
         app.config["CONFIG_ERROR"] = str(e)

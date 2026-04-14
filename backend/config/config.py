@@ -9,6 +9,7 @@ Uses Google AI Studio (Gemini) — free API key from https://aistudio.google.com
 
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 # ──────────────────────────────────────────────
@@ -99,6 +100,6 @@ def validate():
     if not GROQ_API_KEY:
         errors.append("GROQ_API_KEY is not set.")
     if errors:
-        raise EnvironmentError(
+        raise OSError(
             "Configuration errors:\n" + "\n".join(f"  - {e}" for e in errors)
         )

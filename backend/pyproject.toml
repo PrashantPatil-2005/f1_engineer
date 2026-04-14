@@ -1,0 +1,31 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -q --strict-markers"
+pythonpath = ["."]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+# src/ and mcp_server/ have pre-existing lint debt — clean them up in a
+# dedicated pass so this CI gate stays focused on the hardened web layer.
+extend-exclude = [
+    "data",
+    "__pycache__",
+    "node_modules",
+    "src",
+    "mcp_server",
+    "scripts",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = [
+    "E501",  # line length — handled by formatter, and we have long log lines
+    "B008",  # function calls in argument defaults — fine for Flask routes
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]

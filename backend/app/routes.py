@@ -14,14 +14,16 @@ SSE format:
   data: {"type": "done", "answer": "...", "chart_data": {...}, "metrics": {...}}
 """
 
-import json
-import time
 import asyncio
+import importlib.util
+import json
 import logging
 import threading
-import importlib.util
+import time
 from collections import defaultdict
-from flask import Blueprint, request, Response, jsonify, stream_with_context
+
+from flask import Blueprint, Response, jsonify, request, stream_with_context
+
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -170,42 +172,88 @@ def ask():
 
 
 # ──────────────────────────────────────────────
-# GET /api/health — Health check
+# Health / readiness
 # ──────────────────────────────────────────────
+# /api/health — liveness: cheap, no I/O. "Is the process up?"
+# /api/ready  — readiness: deeper checks (deps, API keys, cache, disk).
+#               "Should this instance receive traffic?"
+
+REQUIRED_DEPENDENCIES = ("mcp", "groq", "fastf1", "faiss")
+
+
+def _dependency_status() -> dict:
+    return {
+        name: importlib.util.find_spec(name) is not None
+        for name in REQUIRED_DEPENDENCIES
+    }
+
 
 @api_bp.route("/health", methods=["GET"])
 def health():
-    """Health check endpoint with cache stats."""
-    from flask import current_app
-    # Check for config errors
-    config_error = current_app.config.get("CONFIG_ERROR")
+    """Liveness probe — always returns 200 if the process is responsive.
 
-    # Count cached files
+    Used by container orchestrators and the Docker HEALTHCHECK to detect
+    a wedged process. Intentionally does no I/O so it stays fast.
+    """
+    return jsonify({
+        "status": "ok",
+        "service": "f1-engineer",
+    }), 200
+
+
+@api_bp.route("/ready", methods=["GET"])
+def ready():
+    """Readiness probe — verifies the instance can actually serve traffic.
+
+    Returns 503 when:
+      - config validation failed at startup
+      - a required python dependency is missing
+      - the LLM API key is not set
+      - the data directories are not writable
+    """
+    from flask import current_app
+
+    config_error = current_app.config.get("CONFIG_ERROR")
+    dep_status = _dependency_status()
+    deps_ok = all(dep_status.values())
+    has_api_key = bool(config.GROQ_API_KEY)
+
+    # Cheap writability check — the metrics file gets appended on every query,
+    # so a non-writable data dir is a real outage.
+    data_writable = True
+    try:
+        probe = config.METRICS_DIR / ".ready_probe"
+        probe.touch(exist_ok=True)
+        probe.unlink(missing_ok=True)
+    except Exception as e:
+        data_writable = False
+        logger.warning(f"Readiness: data dir not writable: {e}")
+
     processed_count = len(list(config.PROCESSED_DIR.glob("*.json")))
     faiss_count = len(list(config.FAISS_DIR.glob("*.index")))
 
-    dependency_status = {
-        "mcp": importlib.util.find_spec("mcp") is not None,
-        "groq": importlib.util.find_spec("groq") is not None,
-        "fastf1": importlib.util.find_spec("fastf1") is not None,
-        "faiss": importlib.util.find_spec("faiss") is not None,
-    }
-    dependencies_ok = all(dependency_status.values())
-    has_api_key = bool(config.GROQ_API_KEY)
-
-    status = "unhealthy" if config_error else "healthy"
-    if not dependencies_ok:
-        status = "degraded" if not config_error else status
+    failing = []
+    if config_error:
+        failing.append("config")
+    if not deps_ok:
+        failing.append("dependencies")
     if not has_api_key:
-        status = "degraded" if not config_error else status
+        failing.append("api_key")
+    if not data_writable:
+        failing.append("data_writable")
+
+    ready_ok = not failing
+    status_code = 200 if ready_ok else 503
 
     return jsonify({
-        "status": status,
+        "status": "ready" if ready_ok else "not_ready",
+        "failing": failing,
         "config_error": config_error,
         "checks": {
-            "dependencies_ok": dependencies_ok,
-            "dependency_status": dependency_status,
+            "dependencies_ok": deps_ok,
+            "dependency_status": dep_status,
             "groq_api_key_present": has_api_key,
+            "data_writable": data_writable,
         },
         "cache": {
             "processed_sessions": processed_count,
@@ -217,7 +265,7 @@ def health():
             "top_k": config.TOP_K,
             "max_context_tokens": config.MAX_CONTEXT_TOKENS,
         },
-    })
+    }), status_code
 
 
 # ──────────────────────────────────────────────

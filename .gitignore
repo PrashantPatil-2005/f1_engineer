@@ -8,6 +8,8 @@ dist/
 build/
 *.egg
 
+
+.claude
 ## Environment
 .env
 venv/

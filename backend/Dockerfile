@@ -37,6 +37,8 @@ COPY backend/config/ backend/config/
 COPY backend/src/ backend/src/
 COPY backend/app/ backend/app/
 COPY backend/mcp_server/ backend/mcp_server/
+COPY backend/wsgi.py backend/wsgi.py
+COPY backend/gunicorn.conf.py backend/gunicorn.conf.py
 
 # Copy built frontend
 COPY --from=frontend-build /build/dist frontend/dist/
@@ -54,11 +56,10 @@ EXPOSE 5000
 # Run backend modules relative to backend/ root
 WORKDIR /app/backend
 
-# Run with gunicorn for production
-CMD ["gunicorn", \
-     "--bind", "0.0.0.0:5000", \
-     "--workers", "1", \
-     "--threads", "4", \
-     "--timeout", "120", \
-     "--worker-class", "gthread", \
-     "app.server:create_app()"]
+# Container-level liveness probe — uses /api/health (cheap, no deps touched).
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+    CMD python -c "import urllib.request,sys; \
+sys.exit(0) if urllib.request.urlopen('http://localhost:5000/api/health',timeout=5).status==200 else sys.exit(1)"
+
+# Run with gunicorn for production (config in gunicorn.conf.py)
+CMD ["gunicorn", "-c", "gunicorn.conf.py", "wsgi:app"]
