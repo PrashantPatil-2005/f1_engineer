@@ -45,15 +45,15 @@ with live charts — lap times, tyre strategy, driver comparisons.
 ```bash
 git clone <your-repo-url>
 cd f1-race-engineer
-pip install -r requirements.txt
+pip install -r backend/requirements.txt
 cd frontend && npm install && cd ..
 ```
 
 ### 2. Set up environment
 
 ```bash
-cp .env.example .env
-# Edit .env and add your GROQ_API_KEY
+cp backend/.env.example backend/.env
+# Edit backend/.env and add your GROQ_API_KEY
 # Get a free key at: https://console.groq.com
 ```
 
@@ -61,20 +61,20 @@ cp .env.example .env
 
 ```bash
 # Ingest the 2024 season (~2 min, builds local FAISS indices)
-python scripts/ingest.py --years 2024
+python backend/scripts/ingest.py --years 2024
 
 # Or ingest specific races to start faster
-python scripts/ingest.py --years 2024 --races Monza Monaco Silverstone
+python backend/scripts/ingest.py --years 2024 --races Monza Monaco Silverstone
 
 # Preview what would be ingested without running
-python scripts/ingest.py --years 2024 --dry-run
+python backend/scripts/ingest.py --years 2024 --dry-run
 ```
 
 ### 4. Start the app
 
 ```bash
 # Terminal 1 — backend
-python -m app.server
+cd backend && python -m app.server
 
 # Terminal 2 — frontend dev server
 cd frontend && npm run dev
@@ -114,24 +114,26 @@ React Frontend
 ## Project structure
 
 ```
-├── app/                    Flask server + API routes
-├── config/                 Central config (env vars)
+├── backend/
+│   ├── app/                Flask server + API routes
+│   ├── config/             Central config (env vars)
+│   ├── mcp_server/         MCP server + F1 data tools
+│   ├── scripts/
+│   │   └── ingest.py       Bulk data ingest + FAISS index builder
+│   ├── src/
+│   │   ├── data_loader/    FastF1 session loading
+│   │   ├── data_processor/ Stint-based RAG chunking
+│   │   ├── llm_interface/  Groq streaming completions
+│   │   ├── mcp_client/     MCP client + tool-use loop
+│   │   └── retrieval/      FAISS vector index management
+│   └── data/
+│       ├── cache/          FastF1 local cache
+│       ├── faiss/          Persisted FAISS indices
+│       └── processed/      Processed chunk JSON files
 ├── frontend/               React + Vite frontend
 │   └── src/components/
 │       └── charts/         LapTimeChart, TyreStrategyChart, DriverComparisonChart
-├── mcp_server/             MCP server + F1 data tools
-├── scripts/
-│   └── ingest.py           Bulk data ingest + FAISS index builder
-├── src/
-│   ├── data_loader/        FastF1 session loading
-│   ├── data_processor/     Stint-based RAG chunking
-│   ├── llm_interface/      Groq streaming completions
-│   ├── mcp_client/         MCP client + tool-use loop
-│   └── retrieval/          FAISS vector index management
-└── data/
-    ├── cache/              FastF1 local cache
-    ├── faiss/              Persisted FAISS indices
-    └── processed/          Processed chunk JSON files
+└── data/                   (legacy root data, optional)
 ```
 
 ## Supported data

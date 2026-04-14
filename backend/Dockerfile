@@ -28,20 +28,21 @@ RUN apt-get update && \
 WORKDIR /app
 
 # Install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt && \
+COPY backend/requirements.txt backend/requirements.txt
+RUN pip install --no-cache-dir -r backend/requirements.txt && \
     pip install --no-cache-dir gunicorn
 
 # Copy app source
-COPY config/ config/
-COPY src/ src/
-COPY app/ app/
+COPY backend/config/ backend/config/
+COPY backend/src/ backend/src/
+COPY backend/app/ backend/app/
+COPY backend/mcp_server/ backend/mcp_server/
 
 # Copy built frontend
 COPY --from=frontend-build /build/dist frontend/dist/
 
-# Create data directories
-RUN mkdir -p data/cache data/processed data/faiss data/metrics
+# Create backend data directories
+RUN mkdir -p backend/data/cache backend/data/processed backend/data/faiss backend/data/metrics
 
 # Environment
 ENV PYTHONUNBUFFERED=1
@@ -49,6 +50,9 @@ ENV FLASK_HOST=0.0.0.0
 ENV FLASK_PORT=5000
 
 EXPOSE 5000
+
+# Run backend modules relative to backend/ root
+WORKDIR /app/backend
 
 # Run with gunicorn for production
 CMD ["gunicorn", \

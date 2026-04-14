@@ -24,8 +24,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Path to built frontend (production)
-_FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+# Path to built frontend (production) at repo root
+_FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 
 
 def create_app() -> Flask:

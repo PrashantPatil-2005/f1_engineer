@@ -19,6 +19,7 @@ import time
 import asyncio
 import logging
 import threading
+import importlib.util
 from collections import defaultdict
 from flask import Blueprint, request, Response, jsonify, stream_with_context
 from config import config
@@ -94,13 +95,21 @@ def ask():
 
     logger.info(f"━━━ New query: \"{question}\" ━━━")
     t_total_start = time.perf_counter()
+    try:
+        from src.mcp_client.client import F1MCPClient
+    except ModuleNotFoundError as e:
+        logger.error(f"Missing runtime dependency for chat: {e}")
+        return jsonify({
+            "error": "Chat backend dependency is missing.",
+            "details": str(e),
+            "hint": "Install backend dependencies: pip install -r backend/requirements.txt",
+        }), 503
 
     def generate():
         """SSE generator — runs MCP tool-use loop and streams the result."""
-        from src.mcp_client.client import F1MCPClient
-
         # Create a dedicated event loop for this request's async work
         loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
 
         try:
             # Collect SSE events from the async generator
@@ -168,8 +177,6 @@ def ask():
 def health():
     """Health check endpoint with cache stats."""
     from flask import current_app
-    import os
-
     # Check for config errors
     config_error = current_app.config.get("CONFIG_ERROR")
 
@@ -177,17 +184,35 @@ def health():
     processed_count = len(list(config.PROCESSED_DIR.glob("*.json")))
     faiss_count = len(list(config.FAISS_DIR.glob("*.index")))
 
+    dependency_status = {
+        "mcp": importlib.util.find_spec("mcp") is not None,
+        "groq": importlib.util.find_spec("groq") is not None,
+        "fastf1": importlib.util.find_spec("fastf1") is not None,
+        "faiss": importlib.util.find_spec("faiss") is not None,
+    }
+    dependencies_ok = all(dependency_status.values())
+    has_api_key = bool(config.GROQ_API_KEY)
+
     status = "unhealthy" if config_error else "healthy"
+    if not dependencies_ok:
+        status = "degraded" if not config_error else status
+    if not has_api_key:
+        status = "degraded" if not config_error else status
 
     return jsonify({
         "status": status,
         "config_error": config_error,
+        "checks": {
+            "dependencies_ok": dependencies_ok,
+            "dependency_status": dependency_status,
+            "groq_api_key_present": has_api_key,
+        },
         "cache": {
             "processed_sessions": processed_count,
             "faiss_indices": faiss_count,
         },
         "config": {
-            "model": config.GEMINI_MODEL,
+            "model": config.GROQ_MODEL,
             "embedding_model": config.EMBEDDING_MODEL,
             "top_k": config.TOP_K,
             "max_context_tokens": config.MAX_CONTEXT_TOKENS,
