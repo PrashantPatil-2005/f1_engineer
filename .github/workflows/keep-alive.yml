@@ -19,63 +19,84 @@ jobs:
   ping:
     name: Ping /api/health
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
-      - name: Verify secret is set
+      - name: Ping backend
         env:
           BACKEND_URL: ${{ secrets.BACKEND_URL }}
         run: |
-          if [ -z "$BACKEND_URL" ]; then
-            echo "::error::BACKEND_URL secret is not set. Keep-alive cannot run."
+          set -euo pipefail
+
+          if [ -z "${BACKEND_URL:-}" ]; then
+            echo "::error::BACKEND_URL secret is not set. Add it in repo Settings → Secrets → Actions (e.g. https://your-app.onrender.com)."
             exit 1
           fi
 
-      - name: Ping backend (first attempt)
-        id: ping1
-        env:
-          BACKEND_URL: ${{ secrets.BACKEND_URL }}
-        run: |
-          url="${BACKEND_URL%/}/api/health"
-          echo "Pinging $url"
-          code=$(curl -sS -o /tmp/body -w "%{http_code}" \
-            --max-time 90 \
-            --retry 5 \
-            --retry-delay 10 \
-            --retry-all-errors \
-            "$url" || echo "000")
-          echo "HTTP $code"
-          cat /tmp/body || true
-          echo
-          echo "code=$code" >> "$GITHUB_OUTPUT"
-          if [ "$code" != "200" ]; then
+          base="${BACKEND_URL%/}"
+          if echo "$base" | grep -qiE '/api$'; then
+            echo "::error::BACKEND_URL must be the service root, not end with /api. Use e.g. https://your-app.onrender.com"
             exit 1
           fi
 
-      - name: Second ping (belt-and-braces, 30s later)
-        if: always() && steps.ping1.outcome == 'success'
-        env:
-          BACKEND_URL: ${{ secrets.BACKEND_URL }}
-        run: |
-          sleep 30
-          url="${BACKEND_URL%/}/api/health"
-          curl -sS --max-time 60 --retry 3 --retry-delay 5 "$url" || true
+          health_url="${base}/api/health"
+          echo "Base URL: $base"
+          echo "Health URL: $health_url"
 
-      - name: Recovery ping if first attempt failed
-        if: failure() && steps.ping1.outcome == 'failure'
-        env:
-          BACKEND_URL: ${{ secrets.BACKEND_URL }}
-        run: |
-          url="${BACKEND_URL%/}/api/health"
-          echo "First ping failed — waiting 60s for Render cold-start then retrying"
-          sleep 60
-          code=$(curl -sS -o /tmp/body -w "%{http_code}" \
-            --max-time 120 \
-            --retry 5 \
-            --retry-delay 15 \
-            --retry-all-errors \
-            "$url" || echo "000")
-          echo "Recovery HTTP $code"
-          cat /tmp/body || true
-          if [ "$code" != "200" ]; then
-            exit 1
+          ping_health() {
+            local label="$1"
+            local max_time="$2"
+            local retries="$3"
+            local retry_delay="$4"
+
+            echo "--- $label ---"
+            local code
+            code=$(curl -sS -L -o /tmp/body -w "%{http_code}" \
+              --max-time "$max_time" \
+              --retry "$retries" \
+              --retry-delay "$retry_delay" \
+              --retry-all-errors \
+              "$health_url" 2>/tmp/curl_err || true)
+
+            if [ -z "$code" ] || [ "$code" = "000" ]; then
+              code="000"
+            fi
+
+            echo "HTTP $code"
+            if [ -s /tmp/curl_err ]; then
+              echo "curl stderr:"
+              cat /tmp/curl_err
+            fi
+            if [ -s /tmp/body ]; then
+              echo "body:"
+              head -c 500 /tmp/body
+              echo
+            fi
+
+            [ "$code" = "200" ]
+          }
+
+          # Wake Render (first request often returns 502/503 while the dyno boots).
+          echo "--- warmup (service root) ---"
+          curl -sS -L -o /dev/null --max-time 45 \
+            --retry 3 --retry-delay 5 --retry-all-errors \
+            "$base/" || true
+
+          if ping_health "health check" 90 5 10; then
+            echo "Backend is awake."
+            exit 0
           fi
+
+          echo "First health check failed — waiting 90s for Render cold-start"
+          sleep 90
+
+          if ping_health "recovery health check" 120 6 15; then
+            echo "Backend recovered after cold-start."
+            exit 0
+          fi
+
+          if grep -qi "service suspended" /tmp/body 2>/dev/null; then
+            echo "::error::Render reports this service is SUSPENDED. Open the Render dashboard and resume or redeploy the service — keep-alive cannot fix a suspended instance."
+          else
+            echo "::error::Backend did not return HTTP 200 from $health_url. Check Render logs, redeploy, and that BACKEND_URL matches the live service URL."
+          fi
+          exit 1

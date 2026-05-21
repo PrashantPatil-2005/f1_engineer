@@ -18,27 +18,43 @@ jobs:
   ping:
     name: Redundant ping /api/health
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - name: Ping backend
         env:
           BACKEND_URL: ${{ secrets.BACKEND_URL }}
         run: |
-          if [ -z "$BACKEND_URL" ]; then
+          set -euo pipefail
+
+          if [ -z "${BACKEND_URL:-}" ]; then
             echo "::error::BACKEND_URL secret is not set."
             exit 1
           fi
-          url="${BACKEND_URL%/}/api/health"
-          echo "Pinging $url"
-          code=$(curl -sS -o /tmp/body -w "%{http_code}" \
+
+          base="${BACKEND_URL%/}"
+          health_url="${base}/api/health"
+          echo "Pinging $health_url"
+
+          curl -sS -L -o /dev/null --max-time 45 \
+            --retry 3 --retry-delay 5 --retry-all-errors \
+            "$base/" || true
+
+          code=$(curl -sS -L -o /tmp/body -w "%{http_code}" \
             --max-time 120 \
-            --retry 5 \
+            --retry 6 \
             --retry-delay 15 \
             --retry-all-errors \
-            "$url" || echo "000")
+            "$health_url" 2>/tmp/curl_err || echo "000")
+
           echo "HTTP $code"
-          cat /tmp/body || true
-          echo
+          [ -s /tmp/curl_err ] && cat /tmp/curl_err
+          [ -s /tmp/body ] && head -c 500 /tmp/body && echo
+
           if [ "$code" != "200" ]; then
+            if grep -qi "service suspended" /tmp/body 2>/dev/null; then
+              echo "::error::Render reports this service is SUSPENDED. Resume or redeploy it in the Render dashboard."
+            else
+              echo "::error::Expected HTTP 200 from $health_url (got $code)."
+            fi
             exit 1
           fi
